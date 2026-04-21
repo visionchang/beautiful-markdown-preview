@@ -2,8 +2,13 @@
   "name": "beautiful-markdown-preview",
   "displayName": "Beautiful Markdown Preview",
   "description": "A beautiful markdown preview extension with multiple switchable themes.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/visionchang/beautiful-markdown-preview.git"
+  },
+  "license": "MIT",
   "version": "0.0.1",
-  "publisher": "vision-local",
+  "publisher": "Vissioon",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -39,7 +44,8 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "package": "npx @vscode/vsce package"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
