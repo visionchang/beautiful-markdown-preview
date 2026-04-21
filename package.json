@@ -1,0 +1,55 @@
+{
+  "name": "beautiful-markdown-preview",
+  "displayName": "Beautiful Markdown Preview",
+  "description": "A beautiful markdown preview extension with multiple switchable themes.",
+  "version": "0.0.1",
+  "publisher": "vision-local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "icon": "assets/icon.png",
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "beautifulMarkdownPreview.openPreview",
+        "title": "Beautiful Markdown Preview: Open Preview",
+        "icon": {
+          "light": "assets/preview-light.svg",
+          "dark": "assets/preview-dark.svg"
+        }
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "beautifulMarkdownPreview.openPreview",
+          "when": "editorLangId == markdown",
+          "group": "navigation@100"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^20.12.12",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.0",
+    "mermaid": "^11.14.0"
+  }
+}
