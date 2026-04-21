@@ -23,14 +23,14 @@ const markdown: MarkdownIt = new MarkdownIt({
 
     if (lang && hljs.getLanguage(lang)) {
       try {
-        return `<pre class="code-block"><code>${hljs.highlight(code, { language: lang }).value}</code></pre>`;
+        return `<pre class="code-block"><code class="hljs language-${escapeHtml(lang)}">${hljs.highlight(code, { language: lang }).value}</code></pre>`;
       } catch {
         // fallback below
       }
     }
 
     const escaped = escapeHtml(code);
-    return `<pre class="code-block"><code>${escaped}</code></pre>`;
+    return `<pre class="code-block"><code class="hljs">${escaped}</code></pre>`;
   }
 });
 enhanceMarkdownWithSourceLineAnchors(markdown);
@@ -437,10 +437,11 @@ function getWebviewContent(
       overflow-x: auto;
       background: var(--code-bg);
       border: 1px solid var(--code-border);
+      color: var(--code-text);
     }
     .code-block code {
       background: transparent;
-      color: inherit;
+      color: var(--code-text);
       padding: 0;
     }
     .code-block .hljs {

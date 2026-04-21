@@ -3,3 +3,11 @@
 **/.DS_Store
 src/**
 tsconfig.json
+**/*.map
+**/test/**
+**/tests/**
+**/__tests__/**
+**/demo/**
+**/docs/**
+**/examples/**
+**/*.ts
