@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.3
+
+- Cached preview theme CSS, theme selector HTML, and related JSON at activation to avoid rebuilding on each preview refresh
+- Inlined `mermaid.min.js` content into the webview when readable from disk (falls back to a script URL) for more reliable CSP / nonce behaviour
+- Show the preview top-bar hint only once (tracked in `localStorage` as `bmp-topbar-hint`)
+
 ## 0.0.2
 
 - Fixed code block text color visibility issues
