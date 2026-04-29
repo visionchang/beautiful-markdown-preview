@@ -7,7 +7,7 @@
     "url": "https://github.com/visionchang/beautiful-markdown-preview.git"
   },
   "license": "MIT",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "Vissioon",
   "engines": {
     "vscode": "^1.85.0"
