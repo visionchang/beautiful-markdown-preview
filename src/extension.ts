@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as vscode from "vscode";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
@@ -41,8 +42,34 @@ let extensionBaseUri: vscode.Uri | undefined;
 let ignoreEditorScrollSyncUntil = 0;
 let lastPreviewToEditorSyncAt = 0;
 
+let cachedPreviewThemeCss: string;
+let cachedPreviewThemeOptions: string;
+let cachedPreviewThemeIdsJson: string;
+let cachedPreviewThemeClassNamesJson: string;
+let cachedPreviewMermaidModeByThemeJson: string;
+let cachedMermaidScriptContent: string;
+
 export function activate(context: vscode.ExtensionContext): void {
   extensionBaseUri = context.extensionUri;
+
+  cachedPreviewThemeCss = buildPreviewThemeCss();
+  cachedPreviewThemeOptions = buildPreviewThemeOptionsHtml();
+  cachedPreviewThemeIdsJson = JSON.stringify(PREVIEW_THEME_IDS);
+  cachedPreviewThemeClassNamesJson = JSON.stringify(PREVIEW_THEME_CLASS_NAMES);
+  cachedPreviewMermaidModeByThemeJson = JSON.stringify(PREVIEW_THEME_MERMAID_MODE);
+
+  const mermaidPath = vscode.Uri.joinPath(
+    context.extensionUri,
+    "node_modules",
+    "mermaid",
+    "dist",
+    "mermaid.min.js"
+  ).fsPath;
+  try {
+    cachedMermaidScriptContent = fs.readFileSync(mermaidPath, "utf-8");
+  } catch {
+    cachedMermaidScriptContent = "";
+  }
 
   const openPreviewCmd = vscode.commands.registerCommand(
     OPEN_PREVIEW_COMMAND,
@@ -275,14 +302,17 @@ function getWebviewContent(
   extensionUri: vscode.Uri
 ): string {
   const nonce = getNonce();
-  const previewThemeCss = buildPreviewThemeCss();
-  const previewThemeOptions = buildPreviewThemeOptionsHtml();
-  const previewThemeIdsJson = JSON.stringify(PREVIEW_THEME_IDS);
-  const previewThemeClassNamesJson = JSON.stringify(PREVIEW_THEME_CLASS_NAMES);
-  const previewMermaidModeByThemeJson = JSON.stringify(PREVIEW_THEME_MERMAID_MODE);
-  const mermaidScriptUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(extensionUri, "node_modules", "mermaid", "dist", "mermaid.min.js")
-  );
+  const previewThemeCss = cachedPreviewThemeCss;
+  const previewThemeOptions = cachedPreviewThemeOptions;
+  const previewThemeIdsJson = cachedPreviewThemeIdsJson;
+  const previewThemeClassNamesJson = cachedPreviewThemeClassNamesJson;
+  const previewMermaidModeByThemeJson = cachedPreviewMermaidModeByThemeJson;
+
+  const mermaidScript = cachedMermaidScriptContent
+    ? `<script nonce="${nonce}">${cachedMermaidScriptContent}</script>`
+    : `<script src="${webview.asWebviewUri(
+        vscode.Uri.joinPath(extensionUri, "node_modules", "mermaid", "dist", "mermaid.min.js")
+      )}"></script>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -516,7 +546,7 @@ function getWebviewContent(
     ${bodyHtml}
   </main>
 
-  <script src="${mermaidScriptUri}"></script>
+  ${mermaidScript}
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const themeSelect = document.getElementById("themeSelect");
@@ -539,7 +569,10 @@ function getWebviewContent(
     applyTheme(savedTheme);
     themeSelect.value = savedTheme;
     renderMermaid(savedTheme);
-    showTopbarTemporarily(2000);
+    if (!localStorage.getItem("bmp-topbar-hint")) {
+      showTopbarTemporarily(2000);
+      localStorage.setItem("bmp-topbar-hint", "1");
+    }
 
     themeSelect.addEventListener("change", async () => {
       applyTheme(themeSelect.value);
