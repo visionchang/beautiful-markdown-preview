@@ -11,3 +11,4 @@ tsconfig.json
 **/docs/**
 **/examples/**
 **/*.ts
+image.png
