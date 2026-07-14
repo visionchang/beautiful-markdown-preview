@@ -7,7 +7,7 @@
     "url": "https://github.com/visionchang/beautiful-markdown-preview.git"
   },
   "license": "MIT",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "publisher": "Vissioon",
   "engines": {
     "vscode": "^1.85.0"
@@ -16,7 +16,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onCommand:beautifulMarkdownPreview.openPreview",
+    "onCustomEditor:beautifulMarkdownPreview.editor"
   ],
   "icon": "assets/icon.png",
   "main": "./out/extension.js",
@@ -24,11 +26,27 @@
     "commands": [
       {
         "command": "beautifulMarkdownPreview.openPreview",
-        "title": "Beautiful Markdown Preview: Open Preview",
+        "title": "Open Beautiful Preview",
+        "category": "Beautiful Markdown Preview",
         "icon": {
           "light": "assets/preview-light.svg",
           "dark": "assets/preview-dark.svg"
         }
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "beautifulMarkdownPreview.editor",
+        "displayName": "Beautiful Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.markdown"
+          }
+        ],
+        "priority": "option"
       }
     ],
     "menus": {
@@ -36,6 +54,13 @@
         {
           "command": "beautifulMarkdownPreview.openPreview",
           "when": "editorLangId == markdown",
+          "group": "navigation@100"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "beautifulMarkdownPreview.openPreview",
+          "when": "resourceLangId == markdown",
           "group": "navigation@100"
         }
       ]

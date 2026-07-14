@@ -12,6 +12,7 @@ import {
 } from "./theme-config";
 
 const OPEN_PREVIEW_COMMAND = "beautifulMarkdownPreview.openPreview";
+const CUSTOM_EDITOR_VIEW_TYPE = "beautifulMarkdownPreview.editor";
 
 const markdown: MarkdownIt = new MarkdownIt({
   html: false,
@@ -73,74 +74,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const openPreviewCmd = vscode.commands.registerCommand(
     OPEN_PREVIEW_COMMAND,
-    () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.document.languageId !== "markdown") {
-        vscode.window.showWarningMessage("Please open a Markdown file first.");
+    async (uri?: vscode.Uri) => {
+      const document = await resolveMarkdownDocument(uri);
+      if (!document) {
+        vscode.window.showWarningMessage("Please select a Markdown file first.");
         return;
       }
 
-      currentDocUri = editor.document.uri;
-
-      if (previewPanel) {
-        previewPanel.reveal(vscode.ViewColumn.Beside);
-        updatePreview(previewPanel, editor.document);
-        syncPreviewScrollFromEditor(editor, 80);
-        return;
-      }
-
-      previewPanel = vscode.window.createWebviewPanel(
-        "beautifulMarkdownPreview",
-        `Preview: ${editor.document.fileName.split("/").pop()}`,
-        vscode.ViewColumn.Beside,
-        {
-          enableScripts: true,
-          localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "node_modules")]
-        }
-      );
-
-      previewPanel.webview.onDidReceiveMessage(
-        (message) => {
-          if (!message || message.type !== "previewScrolled" || !currentDocUri) {
-            return;
-          }
-
-          const editor = getCurrentMarkdownEditor();
-          if (!editor) {
-            return;
-          }
-
-          const targetLine = resolveTargetLineFromPreviewMessage(editor.document, message);
-          const currentTopLine = editor.visibleRanges[0]?.start.line ?? 0;
-          if (Math.abs(targetLine - currentTopLine) < 1) {
-            return;
-          }
-
-          const now = Date.now();
-          if (now - lastPreviewToEditorSyncAt < 16) {
-            return;
-          }
-
-          lastPreviewToEditorSyncAt = now;
-          ignoreEditorScrollSyncUntil = now + 90;
-          const targetRange = new vscode.Range(targetLine, 0, targetLine, 0);
-          editor.revealRange(targetRange, vscode.TextEditorRevealType.AtTop);
-        },
-        undefined,
-        context.subscriptions
-      );
-
-      updatePreview(previewPanel, editor.document);
-      syncPreviewScrollFromEditor(editor, 120);
-
-      previewPanel.onDidDispose(
-        () => {
-          previewPanel = undefined;
-          currentDocUri = undefined;
-        },
-        null,
-        context.subscriptions
-      );
+      openPreviewForDocument(document, context);
     }
   );
 
@@ -182,16 +123,119 @@ export function activate(context: vscode.ExtensionContext): void {
     new MarkdownPreviewCodeLensProvider()
   );
 
+  const customEditorProvider = vscode.window.registerCustomEditorProvider(
+    CUSTOM_EDITOR_VIEW_TYPE,
+    new BeautifulMarkdownPreviewEditorProvider(context),
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      },
+      supportsMultipleEditorsPerDocument: false
+    }
+  );
+
   context.subscriptions.push(
     openPreviewCmd,
     docChange,
     activeEditorChange,
     visibleRangeChange,
-    codeLensProvider
+    codeLensProvider,
+    customEditorProvider
   );
 }
 
 export function deactivate(): void {}
+
+async function resolveMarkdownDocument(
+  uri?: vscode.Uri
+): Promise<vscode.TextDocument | undefined> {
+  if (uri instanceof vscode.Uri) {
+    const document = await vscode.workspace.openTextDocument(uri);
+    if (document.languageId !== "markdown") {
+      return undefined;
+    }
+    return document;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "markdown") {
+    return undefined;
+  }
+  return editor.document;
+}
+
+function openPreviewForDocument(
+  document: vscode.TextDocument,
+  context: vscode.ExtensionContext
+): void {
+  currentDocUri = document.uri;
+
+  if (previewPanel) {
+    previewPanel.reveal(vscode.ViewColumn.Beside);
+    updatePreview(previewPanel, document);
+    const editor = getCurrentMarkdownEditor();
+    if (editor) {
+      syncPreviewScrollFromEditor(editor, 80);
+    }
+    return;
+  }
+
+  previewPanel = vscode.window.createWebviewPanel(
+    "beautifulMarkdownPreview",
+    `Preview: ${document.fileName.split("/").pop()}`,
+    vscode.ViewColumn.Beside,
+    {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "node_modules")]
+    }
+  );
+
+  previewPanel.webview.onDidReceiveMessage(
+    (message) => {
+      if (!message || message.type !== "previewScrolled" || !currentDocUri) {
+        return;
+      }
+
+      const editor = getCurrentMarkdownEditor();
+      if (!editor) {
+        return;
+      }
+
+      const targetLine = resolveTargetLineFromPreviewMessage(editor.document, message);
+      const currentTopLine = editor.visibleRanges[0]?.start.line ?? 0;
+      if (Math.abs(targetLine - currentTopLine) < 1) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastPreviewToEditorSyncAt < 16) {
+        return;
+      }
+
+      lastPreviewToEditorSyncAt = now;
+      ignoreEditorScrollSyncUntil = now + 90;
+      const targetRange = new vscode.Range(targetLine, 0, targetLine, 0);
+      editor.revealRange(targetRange, vscode.TextEditorRevealType.AtTop);
+    },
+    undefined,
+    context.subscriptions
+  );
+
+  updatePreview(previewPanel, document);
+  const editor = getCurrentMarkdownEditor();
+  if (editor) {
+    syncPreviewScrollFromEditor(editor, 120);
+  }
+
+  previewPanel.onDidDispose(
+    () => {
+      previewPanel = undefined;
+      currentDocUri = undefined;
+    },
+    null,
+    context.subscriptions
+  );
+}
 
 class MarkdownPreviewCodeLensProvider implements vscode.CodeLensProvider {
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
@@ -209,11 +253,45 @@ class MarkdownPreviewCodeLensProvider implements vscode.CodeLensProvider {
   }
 }
 
+class BeautifulMarkdownPreviewEditorProvider implements vscode.CustomTextEditorProvider {
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  resolveCustomTextEditor(
+    document: vscode.TextDocument,
+    webviewPanel: vscode.WebviewPanel,
+    _token: vscode.CancellationToken
+  ): void {
+    webviewPanel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.context.extensionUri, "node_modules")
+      ]
+    };
+
+    const render = (): void => {
+      updatePreview(webviewPanel, document);
+    };
+
+    render();
+
+    const changeSubscription = vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document.uri.toString() === document.uri.toString()) {
+        render();
+      }
+    });
+
+    webviewPanel.onDidDispose(() => {
+      changeSubscription.dispose();
+    });
+  }
+}
+
 function updatePreview(panel: vscode.WebviewPanel, document: vscode.TextDocument): void {
   if (!extensionBaseUri) {
     return;
   }
-  const rendered = markdown.render(document.getText());
+  const env: { headingSlugs?: Map<string, number> } = {};
+  const rendered = markdown.render(document.getText(), env);
   const fileName = document.fileName.split("/").pop() ?? "Markdown";
   panel.title = `Preview: ${fileName}`;
   panel.webview.html = getWebviewContent(panel.webview, rendered, fileName, extensionBaseUri);
@@ -410,6 +488,7 @@ function getWebviewContent(
       margin-top: 1.4em;
       margin-bottom: 0.6em;
       color: var(--heading);
+      scroll-margin-top: 40px;
     }
     p, li {
       color: var(--text-main);
@@ -530,6 +609,46 @@ function getWebviewContent(
       border-top: 1px solid var(--border);
       margin: 2em 0;
     }
+    .back-to-top {
+      position: fixed;
+      right: 20px;
+      bottom: 24px;
+      z-index: 32;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--topbar-bg);
+      color: var(--text-main);
+      box-shadow: 0 4px 16px color-mix(in srgb, var(--text-main) 12%, transparent);
+      cursor: pointer;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(12px);
+      transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease, background-color 180ms ease;
+      backdrop-filter: blur(8px);
+    }
+    .back-to-top:hover {
+      background: var(--surface);
+      color: var(--link);
+    }
+    .back-to-top.visible {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+    .back-to-top svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
     ${previewThemeCss}
   </style>
 </head>
@@ -545,6 +664,12 @@ function getWebviewContent(
   <main class="container">
     ${bodyHtml}
   </main>
+  <button type="button" class="back-to-top" id="backToTop" aria-label="Back to top" title="Back to top">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 19V5"></path>
+      <path d="M5 12l7-7 7 7"></path>
+    </svg>
+  </button>
 
   ${mermaidScript}
   <script nonce="${nonce}">
@@ -552,6 +677,7 @@ function getWebviewContent(
     const themeSelect = document.getElementById("themeSelect");
     const topbar = document.querySelector(".topbar");
     const topbarRevealZone = document.querySelector(".topbar-reveal-zone");
+    const backToTopButton = document.getElementById("backToTop");
     const body = document.body;
     let ignorePreviewScrollSyncUntil = 0;
     let scrollSyncRafId = 0;
@@ -686,6 +812,72 @@ function getWebviewContent(
       }
     });
 
+    function updateBackToTopVisibility() {
+      if (!backToTopButton) {
+        return;
+      }
+
+      const showBackToTop = window.scrollY > window.innerHeight;
+      backToTopButton.classList.toggle("visible", showBackToTop);
+    }
+
+    function getSourceLineFromElement(element) {
+      let node = element;
+      while (node) {
+        const line = Number(node.getAttribute("data-source-line"));
+        if (Number.isFinite(line)) {
+          return line;
+        }
+        node = node.parentElement;
+      }
+      return undefined;
+    }
+
+    function postEditorScrollSync(lineOverride) {
+      ignorePreviewScrollSyncUntil = Date.now() + 90;
+      const payload = getPreviewScrollPayload();
+      if (typeof lineOverride === "number" && Number.isFinite(lineOverride)) {
+        payload.line = lineOverride;
+      }
+
+      lastPostedScrollAt = Date.now();
+      lastPostedScrollLine = payload.line;
+      vscode.postMessage({
+        type: "previewScrolled",
+        ...payload
+      });
+    }
+
+    backToTopButton?.addEventListener("click", () => {
+      window.scrollTo({ top: 0, behavior: "auto" });
+      updateBackToTopVisibility();
+      postEditorScrollSync(0);
+    });
+
+    updateBackToTopVisibility();
+
+    document.addEventListener("click", (event) => {
+      const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!link) {
+        return;
+      }
+
+      const href = link.getAttribute("href");
+      if (!href || !href.startsWith("#") || href.length < 2) {
+        return;
+      }
+
+      event.preventDefault();
+      const rawId = decodeURIComponent(href.slice(1));
+      const target = document.getElementById(rawId);
+      if (!target) {
+        return;
+      }
+
+      target.scrollIntoView({ behavior: "auto", block: "start" });
+      postEditorScrollSync(getSourceLineFromElement(target));
+    });
+
     window.addEventListener("message", (event) => {
       const message = event.data;
       if (!message || message.type !== "syncScroll") {
@@ -762,6 +954,8 @@ function getWebviewContent(
     }
 
     window.addEventListener("scroll", () => {
+      updateBackToTopVisibility();
+
       if (Date.now() < ignorePreviewScrollSyncUntil) {
         return;
       }
@@ -842,10 +1036,52 @@ function getWebviewContent(
 </html>`;
 }
 
+function slugifyHeading(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function uniqueHeadingSlug(slug: string, env: { headingSlugs?: Map<string, number> }): string {
+  if (!env.headingSlugs) {
+    env.headingSlugs = new Map();
+  }
+
+  const baseSlug = slug || "heading";
+  const count = env.headingSlugs.get(baseSlug) ?? 0;
+  env.headingSlugs.set(baseSlug, count + 1);
+  return count === 0 ? baseSlug : `${baseSlug}-${count}`;
+}
+
 function enhanceMarkdownWithSourceLineAnchors(md: MarkdownIt): void {
+  const defaultHeadingOpenRule = md.renderer.rules.heading_open;
+  md.renderer.rules.heading_open = (tokens: any[], idx: number, options: any, env: any, self: any): string => {
+    const token = tokens[idx];
+    const startLine = token?.map?.[0];
+    if (Number.isInteger(startLine) && typeof token.attrSet === "function") {
+      token.attrSet("data-source-line", String(startLine));
+    }
+
+    const inlineToken = tokens[idx + 1];
+    if (inlineToken?.type === "inline" && typeof inlineToken.content === "string") {
+      const slug = slugifyHeading(inlineToken.content);
+      if (slug && typeof token.attrSet === "function" && !token.attrGet("id")) {
+        token.attrSet("id", uniqueHeadingSlug(slug, env));
+      }
+    }
+
+    if (defaultHeadingOpenRule) {
+      return defaultHeadingOpenRule(tokens, idx, options, env, self);
+    }
+    return self.renderToken(tokens, idx, options);
+  };
+
   const blockOpenRules = [
     "paragraph_open",
-    "heading_open",
     "blockquote_open",
     "bullet_list_open",
     "ordered_list_open",
