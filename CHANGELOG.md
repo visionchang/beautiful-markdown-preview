@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.6
+
+- Added local image preview in the webview (relative, workspace-root, `file://`, and HTML `<img>` paths)
+
 ## 0.0.5
 
 - Added explorer context menu to open Beautiful Preview from a Markdown file
