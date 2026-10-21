@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
@@ -15,7 +16,7 @@ const OPEN_PREVIEW_COMMAND = "beautifulMarkdownPreview.openPreview";
 const CUSTOM_EDITOR_VIEW_TYPE = "beautifulMarkdownPreview.editor";
 
 const markdown: MarkdownIt = new MarkdownIt({
-  html: false,
+  html: true,
   linkify: true,
   typographer: true,
   highlight(code: string, lang: string): string {
@@ -36,6 +37,7 @@ const markdown: MarkdownIt = new MarkdownIt({
   }
 });
 enhanceMarkdownWithSourceLineAnchors(markdown);
+enhanceMarkdownWithLocalImages(markdown);
 
 let previewPanel: vscode.WebviewPanel | undefined;
 let currentDocUri: vscode.Uri | undefined;
@@ -49,6 +51,12 @@ let cachedPreviewThemeIdsJson: string;
 let cachedPreviewThemeClassNamesJson: string;
 let cachedPreviewMermaidModeByThemeJson: string;
 let cachedMermaidScriptContent: string;
+
+type MarkdownRenderEnv = {
+  headingSlugs?: Map<string, number>;
+  documentUri?: vscode.Uri;
+  webview?: vscode.Webview;
+};
 
 export function activate(context: vscode.ExtensionContext): void {
   extensionBaseUri = context.extensionUri;
@@ -184,10 +192,7 @@ function openPreviewForDocument(
     "beautifulMarkdownPreview",
     `Preview: ${document.fileName.split("/").pop()}`,
     vscode.ViewColumn.Beside,
-    {
-      enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "node_modules")]
-    }
+    getPreviewWebviewOptions(document, context.extensionUri)
   );
 
   previewPanel.webview.onDidReceiveMessage(
@@ -261,12 +266,10 @@ class BeautifulMarkdownPreviewEditorProvider implements vscode.CustomTextEditorP
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): void {
-    webviewPanel.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, "node_modules")
-      ]
-    };
+    webviewPanel.webview.options = getPreviewWebviewOptions(
+      document,
+      this.context.extensionUri
+    );
 
     const render = (): void => {
       updatePreview(webviewPanel, document);
@@ -290,11 +293,26 @@ function updatePreview(panel: vscode.WebviewPanel, document: vscode.TextDocument
   if (!extensionBaseUri) {
     return;
   }
-  const env: { headingSlugs?: Map<string, number> } = {};
-  const rendered = markdown.render(document.getText(), env);
+  panel.webview.options = getPreviewWebviewOptions(document, extensionBaseUri);
+  const env: MarkdownRenderEnv = {
+    headingSlugs: new Map(),
+    documentUri: document.uri,
+    webview: panel.webview
+  };
+  const rendered = rewriteHtmlImageSources(
+    markdown.render(document.getText(), env),
+    document.uri,
+    panel.webview
+  );
   const fileName = document.fileName.split("/").pop() ?? "Markdown";
   panel.title = `Preview: ${fileName}`;
-  panel.webview.html = getWebviewContent(panel.webview, rendered, fileName, extensionBaseUri);
+  panel.webview.html = getWebviewContent(
+    panel.webview,
+    rendered,
+    fileName,
+    extensionBaseUri,
+    document.uri
+  );
 }
 
 function syncPreviewScrollFromEditor(
@@ -377,7 +395,8 @@ function getWebviewContent(
   webview: vscode.Webview,
   bodyHtml: string,
   title: string,
-  extensionUri: vscode.Uri
+  extensionUri: vscode.Uri,
+  documentUri: vscode.Uri
 ): string {
   const nonce = getNonce();
   const previewThemeCss = cachedPreviewThemeCss;
@@ -398,9 +417,10 @@ function getWebviewContent(
   <meta charset="UTF-8" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';"
+    content="default-src 'none'; img-src 'self' ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';"
   />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <base href="${escapeHtml(getWebviewBaseHref(webview, documentUri))}" />
   <title>${escapeHtml(title)}</title>
   <style>
     :root {
@@ -529,6 +549,7 @@ function getWebviewContent(
     }
     img {
       max-width: 100%;
+      height: auto;
       border-radius: 10px;
     }
     code {
@@ -1055,6 +1076,142 @@ function uniqueHeadingSlug(slug: string, env: { headingSlugs?: Map<string, numbe
   const count = env.headingSlugs.get(baseSlug) ?? 0;
   env.headingSlugs.set(baseSlug, count + 1);
   return count === 0 ? baseSlug : `${baseSlug}-${count}`;
+}
+
+function getPreviewWebviewOptions(
+  document: vscode.TextDocument,
+  extensionUri: vscode.Uri
+): vscode.WebviewOptions {
+  return {
+    enableScripts: true,
+    localResourceRoots: getLocalResourceRoots(document, extensionUri)
+  };
+}
+
+function getLocalResourceRoots(
+  document: vscode.TextDocument,
+  extensionUri: vscode.Uri
+): vscode.Uri[] {
+  const roots: vscode.Uri[] = [vscode.Uri.joinPath(extensionUri, "node_modules")];
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (workspaceFolders) {
+    for (const folder of workspaceFolders) {
+      roots.push(folder.uri);
+    }
+  }
+  if (document.uri.scheme === "file") {
+    roots.push(vscode.Uri.file(path.dirname(document.uri.fsPath)));
+  }
+
+  return roots;
+}
+
+function getWebviewBaseHref(webview: vscode.Webview, documentUri: vscode.Uri): string {
+  const dirUri =
+    documentUri.scheme === "file"
+      ? vscode.Uri.file(path.dirname(documentUri.fsPath))
+      : vscode.Uri.joinPath(documentUri, "..");
+  const href = webview.asWebviewUri(dirUri).toString();
+  if (href.endsWith("/")) {
+    return href;
+  }
+  return `${href}/`;
+}
+
+function rewriteHtmlImageSources(
+  html: string,
+  documentUri: vscode.Uri,
+  webview: vscode.Webview
+): string {
+  return html.replace(
+    /<img\b([^>]*?)\bsrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
+    (_match: string, before: string, rawSrc: string) => {
+      const src = unwrapHtmlAttrValue(rawSrc);
+      const rewritten = rewriteMarkdownImageSrc(src, documentUri, webview);
+      return `<img${before}src="${escapeHtml(rewritten)}"`;
+    }
+  );
+}
+
+function unwrapHtmlAttrValue(raw: string): string {
+  if (raw.length >= 2) {
+    const quote = raw[0];
+    if ((quote === '"' || quote === "'") && raw[raw.length - 1] === quote) {
+      return raw.slice(1, -1);
+    }
+  }
+  return raw;
+}
+
+function enhanceMarkdownWithLocalImages(md: MarkdownIt): void {
+  const defaultImageRule = md.renderer.rules.image;
+  md.renderer.rules.image = (tokens: any[], idx: number, options: any, env: MarkdownRenderEnv, self: any): string => {
+    const token = tokens[idx];
+    const src = token.attrGet("src");
+    if (src && env.webview && env.documentUri) {
+      token.attrSet("src", rewriteMarkdownImageSrc(src, env.documentUri, env.webview));
+    }
+
+    if (defaultImageRule) {
+      return defaultImageRule(tokens, idx, options, env, self);
+    }
+    return self.renderToken(tokens, idx, options);
+  };
+}
+
+function rewriteMarkdownImageSrc(
+  src: string,
+  documentUri: vscode.Uri,
+  webview: vscode.Webview
+): string {
+  try {
+    if (/^https?:/i.test(src) || /^data:/i.test(src)) {
+      return src;
+    }
+
+    if (/^file:/i.test(src)) {
+      return webview.asWebviewUri(vscode.Uri.parse(src)).toString(true);
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src)) {
+      return src;
+    }
+
+    const resourceUri = resolveLocalMarkdownUri(src, documentUri);
+    return webview.asWebviewUri(resourceUri).toString(true);
+  } catch {
+    return src;
+  }
+}
+
+function resolveLocalMarkdownUri(href: string, documentUri: vscode.Uri): vscode.Uri {
+  let decodedHref = href;
+  try {
+    decodedHref = decodeURI(href);
+  } catch {
+    decodedHref = href;
+  }
+
+  const queryIndex = decodedHref.search(/[?#]/);
+  const pathOnly = queryIndex === -1 ? decodedHref : decodedHref.slice(0, queryIndex);
+
+  if (/^[a-zA-Z]:[\\/]/.test(pathOnly)) {
+    return vscode.Uri.file(pathOnly);
+  }
+
+  if (pathOnly.startsWith("/")) {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
+    if (workspaceFolder) {
+      return vscode.Uri.joinPath(workspaceFolder.uri, pathOnly.replace(/^[\\/]+/, ""));
+    }
+    return vscode.Uri.file(pathOnly);
+  }
+
+  if (documentUri.scheme === "file") {
+    return vscode.Uri.file(path.normalize(path.join(path.dirname(documentUri.fsPath), pathOnly)));
+  }
+
+  return vscode.Uri.joinPath(documentUri, "..", pathOnly);
 }
 
 function enhanceMarkdownWithSourceLineAnchors(md: MarkdownIt): void {
