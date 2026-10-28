@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.8
+
+- Update preview content without reloading the Webview or Mermaid script while typing
+- Added bidirectional scroll sync to Open With → Beautiful Preview, with independent state per preview
+- Fixed HTML anchors without a source-line attribute incorrectly syncing the editor to line zero
+
+## 0.0.7
+
+- Added preview font size controls with remembered custom sizes shared across preview panels
+- Preview font size follows the Markdown editor settings by default; Reset restores this behavior
+
 ## 0.0.6
 
 - Added local image preview in the webview (relative, workspace-root, `file://`, and HTML `<img>` paths)
